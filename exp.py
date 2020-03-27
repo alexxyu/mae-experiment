@@ -1,3 +1,4 @@
+import os
 import time
 import random
 import numpy as np
@@ -5,6 +6,7 @@ import pandas as pd
 import configparser
 from psychopy import visual, event, core, logging, gui, sound, monitors
 
+random.seed(time.time())
 parser = configparser.ConfigParser()
 parser.read('config.ini')
 
@@ -24,15 +26,17 @@ BG_COLOR = "#636363"
 
 # right = CCW, left = CW
 key_list = ['right', 'left']
-data_columns = ['Response', 'Time']
+data_columns = ['Response', 'Time', 'Test Speed']
+experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Adapting', 'Adapt Dir', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)']
 
 # Global variables
 window = None
 fixator = None
 prompt = None
+subject = None
 
 def main():
-    global parser, window, fixator, prompt
+    global parser, window, fixator, prompt, subject
     key_list.append('escape')
 
     # Prompt GUI for experimental setup
@@ -43,51 +47,79 @@ def main():
     dlg.addField('Experimenter ID:')                                                        # res[3]
     dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # res[4]
     dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # res[5]
-    res = dlg.show()
+    exp_res = dlg.show()
     if not dlg.OK:
         exit()
 
+    # Prompt GUI for monitor setup
     dlg = gui.Dlg(title='Monitor Setup')
     dlg.addText('Monitor Info:')
-    dlg.addField('Viewing distance (cm):', 57)
+    dlg.addField('Viewing distance (cm):', '57')
     dlg.addField('Width (cm):')
     dlg.addField('Width (pixels):')
     dlg.addField('Height (pixels):')
-    monitor_info = dlg.show()
-    if not dlg.OK:
-        exit()
+
+    monitor_info = []
+    while True:
+        monitor_info = dlg.show()
+        if not dlg.OK:
+            exit()
+        if '' not in monitor_info and all([s.isdigit() for s in monitor_info]):
+            break
+        else:
+            dlg = gui.Dlg(title='Monitor Setup')
+            dlg.addText('Please fill out all fields and enter integer values only.')
+            dlg.addText('Monitor Info:')
+            dlg.addField('Viewing distance (cm):', '57')
+            dlg.addField('Width (cm):')
+            dlg.addField('Width (pixels):')
+            dlg.addField('Height (pixels):')
+
     viewing_dist, width_cm, width_px, height_px = [int(n) for n in monitor_info]
 
-    exp_bg_info = res[:4]
-    to_run_no_adaption = True if res[4] != 'Yes' else False
-    to_run_adaption = True if res[4] != 'No' else False
-    adaption_dir = res[5]
+    subject = exp_res[0]
+    to_run_no_adaption = True if exp_res[4] != 'Yes' else False
+    to_run_adaption = True if exp_res[4] != 'No' else False
+    adaption_dir = exp_res[5]
 
-    #TODO: Gamma correction
+    # Create monitor profile and window for experiment
     monitor = monitors.Monitor('monitor')
     monitor.setSizePix((height_px, width_px))
     monitor.setWidth(width_cm)
     monitor.setDistance(viewing_dist)
     window = visual.Window(color=BG_COLOR, monitor=monitor, fullscr=True) 
 
-    refresh_rate = window.getActualFrameRate()   
+    gamma_table = np.load('gammaTable.npy')
+    gamma_ramp = np.vstack((gamma_table, gamma_table, gamma_table))
+    window.gammaRamp = gamma_ramp
+
+    refresh_rate = round(window.getActualFrameRate())
     fixator = visual.Circle(window, size=(FIXATOR_SIZE_PX, FIXATOR_SIZE_PX), units='pix')
 
+    # Save experiment setup data to file
+    os.makedirs('data', exist_ok=True)
+    if not os.path.exists('data/experiment_info.csv'):
+        df = pd.DataFrame(columns=experiment_info_columns)
+    else:
+        df = pd.read_csv('data/experiment_info.csv', index_col=0)
+    df.loc[len(df)] = exp_res + monitor_info + [refresh_rate]
+    df.to_csv('data/experiment_info.csv')
+
+    # Run experiment parts
     if to_run_no_adaption:
         run_without_adaption(window)
     if to_run_adaption:
+        if to_run_no_adaption and to_run_adaption:
+            prompt.text = 'You have finished the first part of the experiment. We will now move on to the second part.\n\nPress any key to continue.'
+            prompt.draw()
+            window.flip()
+            event.waitKeys()
         run_with_adaption(window, adaption_dir)
 
-    #TODO: handle experimental data export
-
-    prompt.text = 'You have completed the study.\n\nPress any key to exit.'
-    prompt.draw()
-    window.flip()
-    event.waitKeys()
-    window.close()
+    quit(True)
 
 def run_without_adaption(window):
-    global parser, prompt
+    global parser, prompt, subject
     data = pd.DataFrame(columns=data_columns)
 
     # Experimental instructions
@@ -95,7 +127,7 @@ def run_without_adaption(window):
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = 'The test will be a rotating grating. Press the left arrow key if it appears to be moving clockwise and the right arrow key if it appears to be moving counterclockwise.\n\nAfter the grating, you''ll see a blank screen again for 5 seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = 'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you''ll see a blank screen again for 5 seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -115,15 +147,19 @@ def run_without_adaption(window):
 
     is_first_trial = True
     for trial_speed in trials:
-        # Top-up adaptor
+        # Top-up adaptor (blank screen)
         fixator.color = 'red'
         fixator.draw()
         window.flip()
         if is_first_trial:
-            core.wait(INIT_NO_ADAPTION_TIME)
+            wait_time = INIT_NO_ADAPTION_TIME
             is_first_trial = False
         else:
-            core.wait(POST_NO_ADAPTION_TIME)
+            wait_time = POST_NO_ADAPTION_TIME
+        start_time = time.time()
+        while time.time() - start_time < wait_time:
+            if len(event.getKeys(keyList=['escape'])) > 0:
+                quit()
 
         # ISI
         isi(window)
@@ -144,6 +180,7 @@ def run_without_adaption(window):
 
             core.wait(0.01)
 
+        # Wait for response
         window.flip()
         if len(res) == 0:
             res = event.waitKeys()
@@ -151,13 +188,11 @@ def run_without_adaption(window):
             quit()
 
         end_time = time.time()
-        data.loc[len(data)] = [res[0], end_time - start_time]
-
-    #TODO: handle experimental data export
-    #data.to_csv('')
+        data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
+        data.to_csv(f'data/{subject}_noAdapt.csv')
 
 def run_with_adaption(window, adaption_dir):
-    global parser, prompt
+    global parser, prompt, subject
     data = pd.DataFrame(columns=data_columns)
 
     # Experimental instructions
@@ -165,7 +200,7 @@ def run_with_adaption(window, adaption_dir):
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = 'The test will be a rotating grating. Press the left arrow key if it appears to be moving clockwise and the right arrow key if it appears to be moving counterclockwise.\n\nAfter the grating, you''ll see a rotating grating again for 5 seconds, and then a beep and test grating.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = 'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you''ll see a rotating grating again for 5 seconds, and then a beep and test grating.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -173,6 +208,7 @@ def run_with_adaption(window, adaption_dir):
     grating_size = int(parser['GratingOptions']['GratingSize'])
     stim = visual.RadialStim(window, tex='sin', size=(grating_size, grating_size), units='deg', angularCycles=int(parser['GratingOptions']['GratingCycles']))
 
+    # Generate adaptor speeds
     if adaption_dir == 'Random':
         adaption_dir = 'Clockwise' if random.getrandbits(1) == 0 else 'Counterclockwise'
     if adaption_dir == 'Clockwise':
@@ -238,10 +274,8 @@ def run_with_adaption(window, adaption_dir):
             quit()
 
         end_time = time.time()
-        data.loc[len(data)] = [res[0], end_time - start_time]
-
-    #TODO: handle experimental data export
-    #data.to_csv('')
+        data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
+        data.to_csv(f'data/{subject}_Adapt.csv')
 
 def isi(window):
     window.flip()
@@ -253,10 +287,14 @@ def isi(window):
     window.flip()
     core.wait(ISI_TIME/2)
 
-def quit():
-    prompt.text = 'The experiment has been stopped.\n\nPress any key to exit.'
+def quit(finished = False):
+    if finished:
+        prompt.text = 'You have completed the study.\n\nPress any key to exit.'
+    else:
+        prompt.text = 'The experiment has been stopped.\n\nPress any key to exit.'
     prompt.draw()
     window.flip()
+    event.waitKeys()
     window.close()
     exit()
 
