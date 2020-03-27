@@ -4,7 +4,8 @@ import random
 import numpy as np
 import pandas as pd
 import configparser
-from psychopy import visual, event, core, logging, gui, sound, monitors
+import matplotlib.pyplot as plt
+from psychopy import visual, event, core, gui, sound, monitors
 
 random.seed(time.time())
 parser = configparser.ConfigParser()
@@ -27,16 +28,17 @@ BG_COLOR = "#636363"
 # right = CCW, left = CW
 key_list = ['right', 'left']
 data_columns = ['Response', 'Time', 'Test Speed']
-experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Adapting', 'Adapt Dir', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)']
+experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Seq No', 'Adapting', 'Adapt Dir', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)']
 
 # Global variables
 window = None
 fixator = None
 prompt = None
 subject = None
+seqNo = None
 
 def main():
-    global parser, window, fixator, prompt, subject
+    global parser, window, fixator, prompt, subject, seqNo
     key_list.append('escape')
 
     # Prompt GUI for experimental setup
@@ -45,11 +47,20 @@ def main():
     dlg.addField('Participant Age:')                                                        # res[1]
     dlg.addField('Participant Gender:', choices=['M', 'F'])                                 # res[2]
     dlg.addField('Experimenter ID:')                                                        # res[3]
-    dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # res[4]
-    dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # res[5]
+    dlg.addField('Sequence Number:')                                                        # res[4]
+    dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # res[5]
+    dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # res[6]
     exp_res = dlg.show()
     if not dlg.OK:
         exit()
+
+    if ((exp_res[5] != 'Yes' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_noAdapt.csv')) or 
+       (exp_res[5] != 'No' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_Adapt.csv'))):
+       warning = gui.Dlg(title='Duplicate Filename Warning')
+       warning.addText('An existing file with the same name has been found. Do you want to overwrite it?')
+       res = warning.show()
+       if not warning.OK:
+           exit()
 
     # Prompt GUI for monitor setup
     dlg = gui.Dlg(title='Monitor Setup')
@@ -78,9 +89,10 @@ def main():
     viewing_dist, width_cm, width_px, height_px = [int(n) for n in monitor_info]
 
     subject = exp_res[0]
-    to_run_no_adaption = True if exp_res[4] != 'Yes' else False
-    to_run_adaption = True if exp_res[4] != 'No' else False
-    adaption_dir = exp_res[5]
+    seqNo = exp_res[4]
+    to_run_no_adaption = True if exp_res[5] != 'Yes' else False
+    to_run_adaption = True if exp_res[5] != 'No' else False
+    adaption_dir = exp_res[6]
 
     # Create monitor profile and window for experiment
     monitor = monitors.Monitor('monitor')
@@ -88,6 +100,7 @@ def main():
     monitor.setWidth(width_cm)
     monitor.setDistance(viewing_dist)
     window = visual.Window(color=BG_COLOR, monitor=monitor, fullscr=True) 
+    window.mouseVisible = False
 
     gamma_table = np.load('gammaTable.npy')
     gamma_ramp = np.vstack((gamma_table, gamma_table, gamma_table))
@@ -123,11 +136,11 @@ def run_without_adaption(window):
     data = pd.DataFrame(columns=data_columns)
 
     # Experimental instructions
-    prompt = visual.TextStim(window, color='white', text='You will see a blank screen for 30 seconds. You do not have to press anything. Try to keep your eyes fixed during this time.\n\nThen, you will hear a beep to alert you that a test is about to begin.\n\nPress any key to continue.')
+    prompt = visual.TextStim(window, color='white', text=f'You will see a blank screen for {round(INIT_NO_ADAPTION_TIME)} seconds. You do not have to press anything. Try to keep your eyes fixed during this time.\n\nThen, you will hear a beep to alert you that a test is about to begin.\n\nPress any key to continue.')
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = 'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you''ll see a blank screen again for 5 seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -189,18 +202,19 @@ def run_without_adaption(window):
 
         end_time = time.time()
         data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
-        data.to_csv(f'data/{subject}_noAdapt.csv')
+        data.to_csv(f'data/{subject}{seqNo}_noAdapt.csv')
+        save_psychometric_plot(data, 'No', 'noAdapt')
 
 def run_with_adaption(window, adaption_dir):
     global parser, prompt, subject
     data = pd.DataFrame(columns=data_columns)
 
     # Experimental instructions
-    prompt = visual.TextStim(window, color='white', text='You will first see a rotating grating for 2 minutes. Try to keep your eyes fixed on the grating during this time.\n\nPress any key to continue.')
+    prompt = visual.TextStim(window, color='white', text=f'You will first see a rotating grating for {round(INIT_ADAPTION_TIME)} seconds. Try to keep your eyes fixed on the grating during this time.\n\nPress any key to continue.')
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = 'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you''ll see a rotating grating again for 5 seconds, and then a beep and test grating.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a rotating grating again for {round(POST_ADAPTION_TIME)} seconds, and then a beep and test grating.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -275,9 +289,11 @@ def run_with_adaption(window, adaption_dir):
 
         end_time = time.time()
         data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
-        data.to_csv(f'data/{subject}_Adapt.csv')
+        data.to_csv(f'data/{subject}{seqNo}_Adapt.csv')
+        save_psychometric_plot(data, adaption_dir, 'Adapt')
 
 def isi(window):
+    fixator.draw()
     window.flip()
     core.wait(ISI_TIME/2)
     beep = sound.Sound('A', secs=0.2)
@@ -297,6 +313,22 @@ def quit(finished = False):
     event.waitKeys()
     window.close()
     exit()
+
+def save_psychometric_plot(data, adapt, adaptName):
+    count_data = data.groupby('Test Speed')['Response'].apply(lambda x: x[x.str.contains('right')].count())
+    total_counts = data.groupby('Test Speed').count()['Response']
+    speeds = count_data.index.tolist()
+    right_counts = count_data.tolist()
+    right_props = [r / c for r, c in zip(right_counts, total_counts)]
+
+    plt.clf()
+    plt.plot(speeds, right_props)
+    plt.axhline(y=0.5, color='r', linewidth=0.5, linestyle='dashed')
+    plt.axvline(x=0, color='r', linewidth=0.5, linestyle='dashed')
+    plt.title(f'Subject {subject}{seqNo} ({adapt} Adapt)')
+    plt.xlabel('Test Stimulus Speed (deg/s)')
+    plt.ylabel('Proportion of Responding Clockwise')
+    plt.savefig(f'data/{subject}{seqNo}_{adaptName}_plot.png')
 
 if __name__ == "__main__":
     main()
