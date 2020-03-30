@@ -102,9 +102,11 @@ def main():
     window = visual.Window(color=BG_COLOR, monitor=monitor, fullscr=True) 
     window.mouseVisible = False
 
+    '''
     gamma_table = np.load('gammaTable.npy')
     gamma_ramp = np.vstack((gamma_table, gamma_table, gamma_table))
     window.gammaRamp = gamma_ramp
+    '''
 
     refresh_rate = round(window.getActualFrameRate())
     fixator = visual.Circle(window, size=(FIXATOR_SIZE_PX, FIXATOR_SIZE_PX), units='pix')
@@ -175,7 +177,16 @@ def run_without_adaption(window):
                 quit()
 
         # ISI
-        isi(window)
+        stim.draw()
+        fixator.draw()
+        window.flip()
+        core.wait(ISI_TIME)
+        beep = sound.Sound('A', secs=0.2)
+        beep.play()
+        fixator.color = 'green'
+        stim.draw()
+        fixator.draw()
+        window.flip()
 
         # Test stimulus
         res = []
@@ -263,7 +274,16 @@ def run_with_adaption(window, adaption_dir):
             core.wait(0.01)
 
         # ISI
-        isi(window)
+        stim.draw()
+        fixator.draw()
+        window.flip()
+        core.wait(ISI_TIME)
+        beep = sound.Sound('A', secs=0.2)
+        beep.play()
+        fixator.color = 'green'
+        stim.draw()
+        fixator.draw()
+        window.flip()
 
         # Test stimulus
         res = []
@@ -291,17 +311,6 @@ def run_with_adaption(window, adaption_dir):
         data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
         data.to_csv(f'data/{subject}{seqNo}_Adapt.csv')
         save_psychometric_plot(data, adaption_dir, 'Adapt')
-
-def isi(window):
-    fixator.draw()
-    window.flip()
-    core.wait(ISI_TIME/2)
-    beep = sound.Sound('A', secs=0.2)
-    beep.play()
-    fixator.color = 'green'
-    fixator.draw()
-    window.flip()
-    core.wait(ISI_TIME/2)
 
 def quit(finished = False):
     if finished:
