@@ -168,18 +168,23 @@ def run_without_adaption(window):
         window.flip()
         event.waitKeys()
 
-        cw_speeds = [s for s in speeds if s > 0]
-        ccw_speeds = [s for s in speeds if s < 0]
-
+        num_blocks = int(parser['PracticeOptions']['NumBlocks'])
+        min_per_block = int(parser['PracticeOptions']['MinTrialsPerBlock'])
+        acc_thresh = float(parser['PracticeOptions']['AccuracyThreshold'])
+        starting_trial_time = float(parser['PracticeOptions']['StartingTrialTime'])
         practice_isi_time = float(parser['PracticeOptions']['ISITime'])
-        num_per_block = int(parser['PracticeOptions']['NumTrialsPerBlock'])
-        show_times = np.linspace(float(parser['PracticeOptions']['StartingTrialTime']), TEST_STIMULUS_TIME, num=int(parser['PracticeOptions']['NumBlocks']), endpoint=False)
-        
-        practice_data = pd.DataFrame(columns=data_columns)
+
+        show_times = np.linspace(starting_trial_time, TEST_STIMULUS_TIME, num=num_blocks)
+        print(show_times)
+        practice_data = pd.DataFrame(columns=data_columns+['Stim Time'])
+
         for stim_time in show_times:
-            trials = [random.choice(cw_speeds) for _ in range(num_per_block//2)] + [random.choice(ccw_speeds) for _ in range(num_per_block//2)]
-            random.shuffle(trials)
-            for trial_speed in trials:
+            num_correct, trial_count = 0, 0
+            while True:
+                if trial_count > min_per_block and num_correct/trial_count >= acc_thresh:
+                    break
+                trial_speed = random.choice(speeds)
+                
                 fixator.color = 'red'
                 fixator.draw()
                 window.flip()
@@ -212,7 +217,11 @@ def run_without_adaption(window):
                     quit()
 
                 end_time = time.time()
-                practice_data.loc[len(practice_data)] = [res[0], end_time - start_time, trial_speed]
+                if (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right'):
+                    num_correct += 1
+                trial_count += 1
+
+                practice_data.loc[len(practice_data)] = [res[0], end_time - start_time, trial_speed, stim_time]
                 practice_data.to_csv(f'data/{subject}{seqNo}_practice.csv')
 
         prompt.text = f'We will now move on to the actual experiment.\n\nPress any key to start.'
