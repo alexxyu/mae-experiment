@@ -36,24 +36,29 @@ fixator = None
 prompt = None
 subject = None
 seqNo = None
+runPractice = None
 
 def main():
-    global parser, window, fixator, prompt, subject, seqNo
+    global parser, window, fixator, prompt, subject, seqNo, runPractice
     key_list.append('escape')
 
     # Prompt GUI for experimental setup
     dlg = gui.Dlg(title='Experiment Setup')
-    dlg.addField('Participant ID:')                                                         # res[0]
-    dlg.addField('Participant Age:')                                                        # res[1]
-    dlg.addField('Participant Gender:', choices=['M', 'F'])                                 # res[2]
-    dlg.addField('Experimenter ID:')                                                        # res[3]
-    dlg.addField('Sequence Number:')                                                        # res[4]
-    dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # res[5]
-    dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # res[6]
+    dlg.addField('Participant ID:')                                                         # exp_res[0]
+    dlg.addField('Participant Age:')                                                        # exp_res[1]
+    dlg.addField('Participant Gender:', choices=['M', 'F'])                                 # exp_res[2]
+    dlg.addField('Experimenter ID:')                                                        # exp_res[3]
+    dlg.addField('Sequence Number:')                                                        # exp_res[4]
+    dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # exp_res[5]
+    dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # exp_res[6]
+    dlg.addField('Practice:', 'Yes', choices=['Yes', 'No'])                                 # exp_res[7]
     exp_res = dlg.show()
     if not dlg.OK:
         exit()
 
+    runPractice = True if exp_res[7] == 'Yes' else False
+
+    exp_res = exp_res[:7]
     if ((exp_res[5] != 'Yes' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_noAdapt.csv')) or 
        (exp_res[5] != 'No' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_Adapt.csv'))):
        warning = gui.Dlg(title='Duplicate Filename Warning')
@@ -142,7 +147,7 @@ def run_without_adaption(window):
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to continue.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -150,14 +155,78 @@ def run_without_adaption(window):
     grating_size = int(parser['GratingOptions']['GratingSize'])
     stim = visual.RadialStim(window, tex='sin', size=(grating_size, grating_size), units='deg', angularCycles=int(parser['GratingOptions']['GratingCycles']))
 
+    min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
+    max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
+    step_size = float(parser['NoAdaptionOptions']['StepSize'])
+    
+    speeds = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
+
+    # Practice trials
+    if runPractice:
+        prompt.text = f'You will start with a practice round where the tests will get progressively more difficult.\n\nPress any key to start.'
+        prompt.draw()
+        window.flip()
+        event.waitKeys()
+
+        cw_speeds = [s for s in speeds if s > 0]
+        ccw_speeds = [s for s in speeds if s < 0]
+
+        practice_isi_time = float(parser['PracticeOptions']['ISITime'])
+        num_per_block = int(parser['PracticeOptions']['NumTrialsPerBlock'])
+        show_times = np.linspace(float(parser['PracticeOptions']['StartingTrialTime']), TEST_STIMULUS_TIME, num=int(parser['PracticeOptions']['NumBlocks']), endpoint=False)
+        
+        practice_data = pd.DataFrame(columns=data_columns)
+        for stim_time in show_times:
+            trials = [random.choice(cw_speeds) for _ in range(num_per_block//2)] + [random.choice(ccw_speeds) for _ in range(num_per_block//2)]
+            random.shuffle(trials)
+            for trial_speed in trials:
+                fixator.color = 'red'
+                fixator.draw()
+                window.flip()
+                start_time = time.time()
+                while time.time() - start_time < practice_isi_time:
+                    if len(event.getKeys(keyList=['escape'])) > 0:
+                        quit()
+
+                fixator.color = 'green'
+                event.clearEvents()
+
+                res = []
+                start_time = time.time()
+                while len(res) == 0 and time.time() - start_time < stim_time:
+                    res = event.getKeys(keyList=key_list)
+                    if 'escape' in res:
+                        quit()
+
+                    stim.draw()
+                    fixator.draw()
+                    window.flip()
+                    stim.ori = stim.ori + trial_speed/100
+
+                    core.wait(0.01)
+
+                window.flip()
+                if len(res) == 0:
+                    res = event.waitKeys()
+                if 'escape' in res:
+                    quit()
+
+                end_time = time.time()
+                practice_data.loc[len(practice_data)] = [res[0], end_time - start_time, trial_speed]
+                practice_data.to_csv(f'data/{subject}{seqNo}_practice.csv')
+
+        prompt.text = f'We will now move on to the actual experiment.\n\nPress any key to start.'
+        prompt.draw()
+        window.flip()
+        event.waitKeys()
+
     # Create and loop through trials
     trials = []
     min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
     max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
     step_size = float(parser['NoAdaptionOptions']['StepSize'])
     for _ in range(TRIALS_PER_SPEED):
-        temp = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
-        trials.extend(temp)
+        trials.extend(speeds)
     random.shuffle(trials)
 
     is_first_trial = True
@@ -245,10 +314,11 @@ def run_with_adaption(window, adaption_dir):
         max_speed = float(parser['CCWAdaptionOptions']['MaxTestSpeed'])
         step_size = float(parser['CCWAdaptionOptions']['StepSize'])
 
+    speeds = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
+
     trials = []
     for _ in range(TRIALS_PER_SPEED):
-        temp = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
-        trials.extend(temp)
+        trials.extend(speeds)
     random.shuffle(trials)
 
     # Loop through trials
