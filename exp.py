@@ -1,9 +1,11 @@
 import os
 import time
+import math
 import random
 import numpy as np
 import pandas as pd
 import configparser
+from datetime import datetime
 import matplotlib.pyplot as plt
 from psychopy import visual, event, core, gui, sound, monitors
 
@@ -12,7 +14,10 @@ parser = configparser.ConfigParser()
 parser.read('config.ini')
 
 # EXPERIMENTAL SETTINGS
-TRIALS_PER_SPEED = int(parser['ExperimentOptions']['TrialsPerSpeed'])
+STIM_SIZE = int(parser['StimulusOptions']['StimSize'])
+NUM_PHASES = int(parser['StimulusOptions']['StimCycles'])
+
+TRIALS_PER_COMBINATION = int(parser['ExperimentOptions']['TrialsPerCombo'])
 FIXATOR_SIZE_PX = int(parser['ExperimentOptions']['FixatorSizePx'])
 
 INIT_NO_ADAPTION_TIME = float(parser['ExperimentOptions']['InitialNoAdaptionTime'])
@@ -23,23 +28,30 @@ TEST_STIMULUS_TIME = float(parser['ExperimentOptions']['TestStimulusTime'])
 ISI_TIME = float(parser['ExperimentOptions']['ISITime'])
 
 # GRAPHICAL OPTIONS
-BG_COLOR = "#636363"
+BG_COLOR = "#5e5e5e"
 
-# right = CCW, left = CW
+# right = CW, left = CCW
 key_list = ['right', 'left']
-data_columns = ['Response', 'Time', 'Test Speed']
-experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Seq No', 'Adapting', 'Adapt Dir', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)']
+
+data_columns = ['Response', 'Test Stim', 'Test Speed', 'Correct', 'Time']
+experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Adapting', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)', 'Timestamp']
 
 # Global variables
 window = None
 fixator = None
 prompt = None
 subject = None
-seqNo = None
 runPractice = None
+timestamp = None
+
+stimTypes = None
+stimLog, stimLog_t, stimMirror, stimMirror_t = None, None, None, None
 
 def main():
-    global parser, window, fixator, prompt, subject, seqNo, runPractice
+    global parser, window, fixator, prompt, subject, runPractice, timestamp
+    global stimTypes, stimLog, stimLog_t, stimMirror, stimMirror_t
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     key_list.append('escape')
 
     # Prompt GUI for experimental setup
@@ -48,32 +60,40 @@ def main():
     dlg.addField('Participant Age:')                                                        # exp_res[1]
     dlg.addField('Participant Gender:', choices=['M', 'F'])                                 # exp_res[2]
     dlg.addField('Experimenter ID:')                                                        # exp_res[3]
-    dlg.addField('Sequence Number:')                                                        # exp_res[4]
-    dlg.addField('Include Adaption:', 'Both', choices=['Both', 'No', 'Yes'])                # exp_res[5]
-    dlg.addField('Adaption Direction:', 'Random', choices=['Random', 'Clockwise', 'Counterclockwise'])      # exp_res[6]
-    dlg.addField('Practice:', 'Yes', choices=['Yes', 'No'])                                 # exp_res[7]
+    dlg.addField('Adaption:', 'Both', choices=['Both', 'No Adaptation Only', 'Adaptation Only'])     # exp_res[4]
+    dlg.addField('Number of Unique Stimuli:', '2', choices=['2', '3'])                      # exp_res[5]
+    dlg.addField('Practice for No Adaption:', 'Yes', choices=['Yes', 'No'])                 # exp_res[6]
     exp_res = dlg.show()
     if not dlg.OK:
         exit()
 
-    runPractice = True if exp_res[7] == 'Yes' else False
+    def_width_cm, def_width_px, def_height_px = '', '', ''
+    if os.path.exists(f'data/experiment_info.csv'):
+        exp_df = pd.read_csv('data/experiment_info.csv', index_col=0)
+        rows = exp_df.loc[exp_df['Subject'] == exp_res[0]]
+        if len(rows) > 0:
+            def_width_cm = str(rows.iloc[0]['Width (cm)'])
+            def_width_px = str(rows.iloc[0]['Width (px)'])
+            def_height_px = str(rows.iloc[0]['Height (px)'])
+            dlg = gui.Dlg(title='Subject Settings Found')
+            dlg.addText('Subject ID with monitor info has been found.')
+            dlg.show()
 
-    exp_res = exp_res[:7]
-    if ((exp_res[5] != 'Yes' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_noAdapt.csv')) or 
-       (exp_res[5] != 'No' and os.path.exists(f'data/{exp_res[0]}{exp_res[4]}_Adapt.csv'))):
-       warning = gui.Dlg(title='Duplicate Filename Warning')
-       warning.addText('An existing file with the same name has been found. Do you want to overwrite it?')
-       res = warning.show()
-       if not warning.OK:
-           exit()
+    runPractice = True if exp_res[6] == 'Yes' else False
+    numStim = int(exp_res[5])
+    stimTypes = ['log', 'mirror']
+    if numStim == 3:
+        stimTypes.append('both')
+
+    exp_res = exp_res[:5]
 
     # Prompt GUI for monitor setup
     dlg = gui.Dlg(title='Monitor Setup')
     dlg.addText('Monitor Info:')
     dlg.addField('Viewing distance (cm):', '57')
-    dlg.addField('Width (cm):')
-    dlg.addField('Width (pixels):')
-    dlg.addField('Height (pixels):')
+    dlg.addField('Width (cm):', def_width_cm)
+    dlg.addField('Width (pixels):', def_width_px)
+    dlg.addField('Height (pixels):', def_height_px)
 
     monitor_info = []
     while True:
@@ -94,10 +114,8 @@ def main():
     viewing_dist, width_cm, width_px, height_px = [int(n) for n in monitor_info]
 
     subject = exp_res[0]
-    seqNo = exp_res[4]
-    to_run_no_adaption = True if exp_res[5] != 'Yes' else False
-    to_run_adaption = True if exp_res[5] != 'No' else False
-    adaption_dir = exp_res[6]
+    to_run_no_adaption = True if exp_res[4] != 'Adaptation Only' else False
+    to_run_adaption = True if exp_res[4] != 'No Adaptation Only' else False
 
     # Create monitor profile and window for experiment
     monitor = monitors.Monitor('monitor')
@@ -122,8 +140,13 @@ def main():
         df = pd.DataFrame(columns=experiment_info_columns)
     else:
         df = pd.read_csv('data/experiment_info.csv', index_col=0)
-    df.loc[len(df)] = exp_res + monitor_info + [refresh_rate]
+    df.loc[len(df)] = exp_res + monitor_info + [refresh_rate, timestamp]
     df.to_csv('data/experiment_info.csv')
+
+    stimLog_t = generate_stimulus()
+    stimMirror_t = generate_stimulus(dir=-1)
+    stimLog = generate_stimulus(transparent=False)
+    stimMirror = generate_stimulus(transparent=False, dir=-1)
 
     # Run experiment parts
     if to_run_no_adaption:
@@ -134,7 +157,7 @@ def main():
             prompt.draw()
             window.flip()
             event.waitKeys()
-        run_with_adaption(window, adaption_dir)
+        run_with_adaption(window)
 
     quit(True)
 
@@ -147,13 +170,10 @@ def run_without_adaption(window):
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to continue.'
+    prompt.text = f'The test will be a rotating spiral. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to continue.'
     prompt.draw()
     window.flip()
     event.waitKeys()
-
-    grating_size = int(parser['GratingOptions']['GratingSize'])
-    stim = visual.RadialStim(window, tex='sin', size=(grating_size, grating_size), units='deg', angularCycles=int(parser['GratingOptions']['GratingCycles']))
 
     min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
     max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
@@ -175,7 +195,6 @@ def run_without_adaption(window):
         practice_isi_time = float(parser['PracticeOptions']['ISITime'])
 
         show_times = np.linspace(starting_trial_time, TEST_STIMULUS_TIME, num=num_blocks)
-        print(show_times)
         practice_data = pd.DataFrame(columns=data_columns+['Stim Time'])
 
         for stim_time in show_times:
@@ -184,6 +203,7 @@ def run_without_adaption(window):
                 if trial_count > min_per_block and num_correct/trial_count >= acc_thresh:
                     break
                 trial_speed = random.choice(speeds)
+                trial_stim = random.choice(stimTypes)
                 
                 fixator.color = 'red'
                 fixator.draw()
@@ -197,16 +217,27 @@ def run_without_adaption(window):
                 event.clearEvents()
 
                 res = []
+                reset_stims()
                 start_time = time.time()
                 while len(res) == 0 and time.time() - start_time < stim_time:
                     res = event.getKeys(keyList=key_list)
                     if 'escape' in res:
                         quit()
-
-                    stim.draw()
+                    
+                    if trial_stim == 'log':
+                        stimLog.draw()
+                        stimLog.ori = stimLog.ori + trial_speed/100
+                    elif trial_stim == 'mirror':
+                        stimMirror.draw()
+                        stimMirror.ori = stimMirror.ori + trial_speed/100
+                    else:
+                        stimLog.draw()
+                        stimMirror_t.draw()
+                        stimLog.ori = stimLog.ori + trial_speed/100
+                        stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+                        
                     fixator.draw()
                     window.flip()
-                    stim.ori = stim.ori + trial_speed/100
 
                     core.wait(0.01)
 
@@ -221,8 +252,9 @@ def run_without_adaption(window):
                     num_correct += 1
                 trial_count += 1
 
-                practice_data.loc[len(practice_data)] = [res[0], end_time - start_time, trial_speed, stim_time]
-                practice_data.to_csv(f'data/{subject}{seqNo}_practice.csv')
+                is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
+                practice_data.loc[len(practice_data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time]
+                practice_data.to_csv(f'data/{subject}{timestamp}_practice.csv')
 
         prompt.text = f'We will now move on to the actual experiment.\n\nPress any key to start.'
         prompt.draw()
@@ -234,12 +266,20 @@ def run_without_adaption(window):
     min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
     max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
     step_size = float(parser['NoAdaptionOptions']['StepSize'])
-    for _ in range(TRIALS_PER_SPEED):
-        trials.extend(speeds)
+
+    combinations = []
+    for stim in stimTypes:
+        for speed in speeds:
+            combinations.append({'stim': stim, 'speed': speed})
+
+    [trials.extend(combinations) for _ in range(TRIALS_PER_COMBINATION)]
     random.shuffle(trials)
 
     is_first_trial = True
-    for trial_speed in trials:
+    for trial in trials:
+        trial_speed = trial['speed']
+        trial_stim = trial['stim']
+
         # Top-up adaptor (blank screen)
         fixator.color = 'red'
         fixator.draw()
@@ -255,31 +295,54 @@ def run_without_adaption(window):
                 quit()
 
         # ISI
-        stim.draw()
+        if trial_stim == 'log':
+            stimLog.draw()
+        elif trial_stim == 'mirror':
+            stimMirror.draw()
+        else:
+            stimLog.draw()
+            stimMirror_t.draw()
         fixator.draw()
         window.flip()
         core.wait(ISI_TIME)
         beep = sound.Sound('A', secs=0.2)
         beep.play()
         fixator.color = 'green'
-        stim.draw()
+        if trial_stim == 'log':
+            stimLog.draw()
+        elif trial_stim == 'mirror':
+            stimMirror.draw()
+        else:
+            stimLog.draw()
+            stimMirror_t.draw()
         fixator.draw()
         window.flip()
 
         # Test stimulus
         res = []
         event.clearEvents()
+        reset_stims()
         start_time = time.time()
         while len(res) == 0 and time.time() - start_time < TEST_STIMULUS_TIME:
             res = event.getKeys(keyList=key_list)
+
             if 'escape' in res:
                 quit()
 
-            stim.draw()
+            if trial_stim == 'log':
+                stimLog.draw()
+                stimLog.ori = stimLog.ori + trial_speed/100
+            elif trial_stim == 'mirror':
+                stimMirror.draw()
+                stimMirror.ori = stimMirror.ori + trial_speed/100
+            else:
+                stimLog.draw()
+                stimMirror_t.draw()
+                stimLog.ori = stimLog.ori + trial_speed/100
+                stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+
             fixator.draw()
             window.flip()
-            stim.ori = stim.ori + trial_speed/100
-
             core.wait(0.01)
 
         # Wait for response
@@ -290,53 +353,53 @@ def run_without_adaption(window):
             quit()
 
         end_time = time.time()
-        data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
-        data.to_csv(f'data/{subject}{seqNo}_noAdapt.csv')
+
+        is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
+        data.loc[len(data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time]
+        data.to_csv(f'data/{subject}{timestamp}_noAdapt.csv')
         save_psychometric_plot(data, 'No', 'noAdapt')
 
-def run_with_adaption(window, adaption_dir):
+def run_with_adaption(window):
     global parser, prompt, subject
     data = pd.DataFrame(columns=data_columns)
 
     # Experimental instructions
-    prompt = visual.TextStim(window, color='white', text=f'You will first see a rotating grating for {round(INIT_ADAPTION_TIME)} seconds. Try to keep your eyes fixed on the grating during this time.\n\nPress any key to continue.')
+    prompt = visual.TextStim(window, color='white', text=f'You will first see a rotating spiral for {round(INIT_ADAPTION_TIME)} seconds. Try to keep your eyes fixed on the red dot during this time.\n\nPress any key to continue.')
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = f'The test will be a rotating grating. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a rotating grating again for {round(POST_ADAPTION_TIME)} seconds, and then a beep and test grating.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
+    prompt.text = f'The test will be a rotating spiral. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the spiral, you\'\'ll see a rotating spiral again for {round(POST_ADAPTION_TIME)} seconds, and then a beep and test spiral.\n\nThis will repeat until the end of the experiment.\n\nPress any key to start.'
     prompt.draw()
     window.flip()
     event.waitKeys()
-
-    grating_size = int(parser['GratingOptions']['GratingSize'])
-    stim = visual.RadialStim(window, tex='sin', size=(grating_size, grating_size), units='deg', angularCycles=int(parser['GratingOptions']['GratingCycles']))
 
     # Generate adaptor speeds
-    if adaption_dir == 'Random':
-        adaption_dir = 'Clockwise' if random.getrandbits(1) == 0 else 'Counterclockwise'
-    if adaption_dir == 'Clockwise':
-        min_speed = float(parser['CWAdaptionOptions']['MinTestSpeed'])
-        max_speed = float(parser['CWAdaptionOptions']['MaxTestSpeed'])
-        step_size = float(parser['CWAdaptionOptions']['StepSize'])
-    else:
-        min_speed = float(parser['CCWAdaptionOptions']['MinTestSpeed'])
-        max_speed = float(parser['CCWAdaptionOptions']['MaxTestSpeed'])
-        step_size = float(parser['CCWAdaptionOptions']['StepSize'])
-
+    min_speed = float(parser['AdaptionOptions']['MinTestSpeed'])
+    max_speed = float(parser['AdaptionOptions']['MaxTestSpeed'])
+    step_size = float(parser['AdaptionOptions']['StepSize'])
     speeds = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
 
     trials = []
-    for _ in range(TRIALS_PER_SPEED):
-        trials.extend(speeds)
+    combinations = []
+    for stim in stimTypes:
+        for speed in speeds:
+            combinations.append({'stim': stim, 'speed': speed})
+
+    [trials.extend(combinations) for _ in range(TRIALS_PER_COMBINATION)]
     random.shuffle(trials)
 
     # Loop through trials
     is_first_trial = True
-    adaptor_speed = float(parser['GratingOptions']['AdaptorSpeed'])
-    adaptor_speed = adaptor_speed if adaption_dir == 'Clockwise' else -adaptor_speed
-    for trial_speed in trials:
+    adaptor_speed = float(parser['AdaptionOptions']['AdaptorSpeed'])
+    adaptor_dir_change_prop = float(parser['AdaptionOptions']['AdaptorDirChangeTime'])
+
+    for trials in trials:
+        trial_stim = trials['stim']
+        trial_speed = trials['speed']
+
         # Top up adaptor
         fixator.color = 'red'
+        adaptor_speed = abs(adaptor_speed)
         adaption_time = INIT_ADAPTION_TIME if is_first_trial else POST_ADAPTION_TIME
         if is_first_trial:
             is_first_trial = False
@@ -345,22 +408,39 @@ def run_with_adaption(window, adaption_dir):
             if len(event.getKeys(keyList=['escape'])) > 0:
                 quit()
 
-            stim.draw()
+            stimLog.draw()
+            stimMirror_t.draw()
+            stimLog.ori = stimLog.ori + adaptor_speed/100
+            stimMirror_t.ori = stimMirror_t.ori - adaptor_speed/100
+
+            if time.time() - start_time >= adaptor_dir_change_prop * adaption_time and adaptor_speed > 0:
+                adaptor_speed = -adaptor_speed
+
             fixator.draw()
             window.flip()
-            stim.ori = (stim.ori + adaptor_speed/100) % 360
-
             core.wait(0.01)
 
         # ISI
-        stim.draw()
+        if trial_stim == 'log':
+            stimLog.draw()
+        elif trial_stim == 'mirror':
+            stimMirror.draw()
+        else:
+            stimLog.draw()
+            stimMirror_t.draw()
         fixator.draw()
         window.flip()
         core.wait(ISI_TIME)
         beep = sound.Sound('A', secs=0.2)
         beep.play()
         fixator.color = 'green'
-        stim.draw()
+        if trial_stim == 'log':
+            stimLog.draw()
+        elif trial_stim == 'mirror':
+            stimMirror.draw()
+        else:
+            stimLog.draw()
+            stimMirror_t.draw()
         fixator.draw()
         window.flip()
 
@@ -373,11 +453,20 @@ def run_with_adaption(window, adaption_dir):
             if 'escape' in res:
                 quit()
 
-            stim.draw()
+            if trial_stim == 'log':
+                stimLog.draw()
+                stimLog.ori = stimLog.ori + trial_speed/100
+            elif trial_stim == 'mirror':
+                stimMirror.draw()
+                stimMirror.ori = stimMirror.ori + trial_speed/100
+            else:
+                stimLog.draw()
+                stimMirror_t.draw()
+                stimLog.ori = stimLog.ori + trial_speed/100
+                stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+
             fixator.draw()
             window.flip()
-            stim.ori = (stim.ori + trial_speed/100) % 360
-
             core.wait(0.01)
 
         window.flip()
@@ -387,9 +476,62 @@ def run_with_adaption(window, adaption_dir):
             quit()
 
         end_time = time.time()
-        data.loc[len(data)] = [res[0], end_time - start_time, trial_speed]
-        data.to_csv(f'data/{subject}{seqNo}_Adapt.csv')
-        save_psychometric_plot(data, adaption_dir, 'Adapt')
+
+        is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
+        data.loc[len(data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time]
+        data.to_csv(f'data/{subject}{timestamp}_Adapt.csv')
+        save_psychometric_plot(data, 'With', 'Adapt')
+
+def generate_stimulus(transparent = True, dir = 1):
+    
+    b = 0.7
+    radius = np.exp(2*np.pi*b)
+    lw = float(parser['StimulusOptions']['StimLineWidth'])
+    
+    phase_number = 1
+    phase_thresh = np.pi / NUM_PHASES
+    t = np.linspace(0, 2*np.pi, 100)
+    phi_vals = np.linspace(0, 2*np.pi, 1000)
+
+    if transparent:
+        fig, ax = plt.subplots()
+    else:
+        fig, ax = plt.subplots(facecolor=BG_COLOR)
+        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='white', fill=True)        
+
+    already_black = False
+    for phi in phi_vals:
+        c = 'white'
+        if phi > phase_number * phase_thresh:
+            c = 'black'
+            phase_number += 1
+        elif phi == 0:
+            c = 'black'
+        else:
+            continue
+        
+        x = np.cos(dir*(t - phi)) * np.exp(b*t)
+        y = np.sin(dir*(t - phi)) * np.exp(b*t)
+
+        x_n = [x for x, y in zip(x, y) if math.sqrt(x**2 + y**2) >= 20]
+        y_n = [y for x, y in zip(x, y) if math.sqrt(x**2 + y**2) >= 20]
+
+        ax.plot(x_n, y_n, color=c, linewidth=lw, linestyle='--')
+
+    ax.get_xaxis().set_visible(False)
+    ax.get_yaxis().set_visible(False)
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+    if transparent:
+        plt.savefig('stim.png', bbox_inches='tight', transparent = True)
+    else:
+        ax.add_artist(circle)
+        plt.savefig('stim.png', bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+    
+    stim = visual.ImageStim(window, image='stim.png', units='deg', size=(STIM_SIZE, STIM_SIZE))
+    os.remove('stim.png')
+    return stim
 
 def quit(finished = False):
     if finished:
@@ -402,6 +544,12 @@ def quit(finished = False):
     window.close()
     exit()
 
+def reset_stims():
+    stimLog_t.ori = 0
+    stimMirror_t.ori = 0
+    stimLog.ori = 0
+    stimMirror.ori = 0
+
 def save_psychometric_plot(data, adapt, adaptName):
     count_data = data.groupby('Test Speed')['Response'].apply(lambda x: x[x.str.contains('right')].count())
     total_counts = data.groupby('Test Speed').count()['Response']
@@ -413,10 +561,10 @@ def save_psychometric_plot(data, adapt, adaptName):
     plt.plot(speeds, right_props)
     plt.axhline(y=0.5, color='r', linewidth=0.5, linestyle='dashed')
     plt.axvline(x=0, color='r', linewidth=0.5, linestyle='dashed')
-    plt.title(f'Subject {subject}{seqNo} ({adapt} Adapt)')
+    plt.title(f'Subject {subject}{timestamp} ({adapt} Adapt)')
     plt.xlabel('Test Stimulus Speed (deg/s)')
     plt.ylabel('Proportion of Responding Clockwise')
-    plt.savefig(f'data/{subject}{seqNo}_{adaptName}_plot.png')
+    plt.savefig(f'data/{subject}{timestamp}_{adaptName}_plot.png')
 
 if __name__ == "__main__":
     main()
