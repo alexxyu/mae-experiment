@@ -28,7 +28,7 @@ TEST_STIMULUS_TIME = float(parser['ExperimentOptions']['TestStimulusTime'])
 ISI_TIME = float(parser['ExperimentOptions']['ISITime'])
 
 # GRAPHICAL OPTIONS
-BG_COLOR = "#5e5e5e"
+BG_COLOR = '#A2A2A2'
 
 # right = CW, left = CCW
 key_list = ['right', 'left']
@@ -131,7 +131,7 @@ def main():
     window.gammaRamp = gamma_ramp
     '''
 
-    refresh_rate = round(window.getActualFrameRate())
+    refresh_rate = str(round(window.getActualFrameRate()))
     fixator = visual.Circle(window, size=(FIXATOR_SIZE_PX, FIXATOR_SIZE_PX), units='pix')
 
     # Save experiment setup data to file
@@ -140,7 +140,8 @@ def main():
         df = pd.DataFrame(columns=experiment_info_columns)
     else:
         df = pd.read_csv('data/experiment_info.csv', index_col=0)
-    df.loc[len(df)] = exp_res + monitor_info + [refresh_rate, timestamp]
+    
+    df = df.append(pd.Series(exp_res + monitor_info + [refresh_rate, timestamp], index=experiment_info_columns), ignore_index=True)
     df.to_csv('data/experiment_info.csv')
 
     stimLog_t = generate_stimulus()
@@ -170,7 +171,7 @@ def run_without_adaption(window):
     prompt.draw()
     window.flip()
     event.waitKeys()
-    prompt.text = f'The test will be a rotating spiral. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the grating, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to continue.'
+    prompt.text = f'The test will be a rotating spiral. Press the right arrow key if it appears to be rotating to the right (clockwise) and the left arrow key if it appears to be rotating to the left (counterclockwise).\n\nAfter the spiral, you\'\'ll see a blank screen again for {round(POST_NO_ADAPTION_TIME)} seconds, and then a beep and test image.\n\nThis will repeat until the end of the experiment.\n\nPress any key to continue.'
     prompt.draw()
     window.flip()
     event.waitKeys()
@@ -183,7 +184,7 @@ def run_without_adaption(window):
 
     # Practice trials
     if runPractice:
-        prompt.text = f'You will start with a practice round where the tests will get progressively more difficult.\n\nPress any key to start.'
+        prompt.text = f'You will start with a practice round where the tests will get progressively more difficult. You will hear a beep if your response is incorrect. \n\nPress any key to start.'
         prompt.draw()
         window.flip()
         event.waitKeys()
@@ -253,7 +254,11 @@ def run_without_adaption(window):
                 trial_count += 1
 
                 is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
-                practice_data.loc[len(practice_data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time]
+                if not is_correct:
+                    beep = sound.Sound('A', secs=0.2)
+                    beep.play()
+
+                practice_data = practice_data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time], index=practice_data.columns), ignore_index=True)
                 practice_data.to_csv(f'data/{subject}{timestamp}_practice.csv')
 
         prompt.text = f'We will now move on to the actual experiment.\n\nPress any key to start.'
@@ -355,7 +360,7 @@ def run_without_adaption(window):
         end_time = time.time()
 
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
-        data.loc[len(data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time]
+        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_noAdapt.csv')
         save_psychometric_plot(data, 'No', 'noAdapt')
 
@@ -478,7 +483,7 @@ def run_with_adaption(window):
         end_time = time.time()
 
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
-        data.loc[len(data)] = [res[0], trial_stim, trial_speed, is_correct, end_time - start_time]
+        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_Adapt.csv')
         save_psychometric_plot(data, 'With', 'Adapt')
 
@@ -497,7 +502,7 @@ def generate_stimulus(transparent = True, dir = 1):
         fig, ax = plt.subplots()
     else:
         fig, ax = plt.subplots(facecolor=BG_COLOR)
-        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='white', fill=True)        
+        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor=BG_COLOR, fill=True)        
 
     already_black = False
     for phi in phi_vals:

@@ -19,8 +19,8 @@ def generate_stimulus(transparent = True, dir = 1):
     if transparent:
         fig, ax = plt.subplots()
     else:
-        fig, ax = plt.subplots(facecolor='#5e5e5e')
-        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='white', fill=True)        
+        fig, ax = plt.subplots(facecolor='#A2A2A2')
+        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='#A2A2A2', fill=True)        
 
     already_black = False
     for phi in phi_vals:
@@ -61,7 +61,7 @@ monitor.setSizePix((600, 600))
 monitor.setWidth(30)
 monitor.setDistance(54)
 
-window = visual.Window(size=(600, 600), color="#5e5e5e", monitor=monitor, fullscr=False) 
+window = visual.Window(size=(600, 600), color="#A2A2A2", monitor=monitor, fullscr=False) 
 fixator = visual.Circle(window, size=(5, 5), color='red', units='pix')
 
 stim_1 = generate_stimulus(transparent=False)
