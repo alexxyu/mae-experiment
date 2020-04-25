@@ -28,27 +28,28 @@ TEST_STIMULUS_TIME = float(parser['ExperimentOptions']['TestStimulusTime'])
 ISI_TIME = float(parser['ExperimentOptions']['ISITime'])
 
 # GRAPHICAL OPTIONS
-BG_COLOR = '#A2A2A2'
+BG_COLOR = '#5E5E5E'
 
 # right = CW, left = CCW
 key_list = ['right', 'left']
 
 data_columns = ['Response', 'Test Stim', 'Test Speed', 'Correct', 'Time']
-experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Adapting', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)', 'Timestamp']
+experiment_info_columns = ['Subject', 'Age', 'Gender', 'Experimenter', 'Adapting', 'View Dist (cm)', 'Width (cm)', 'Width (px)', 'Height (px)', 'Refresh Rate (Hz)', 'Timestamp', 'Adaption Dir']
 
 # Global variables
 window = None
 fixator = None
 prompt = None
 subject = None
-runPractice = None
+run_practice = None
 timestamp = None
+adaption_dir = None
 
 stimTypes = None
 stimLog, stimLog_t, stimMirror, stimMirror_t = None, None, None, None
 
 def main():
-    global parser, window, fixator, prompt, subject, runPractice, timestamp
+    global parser, window, fixator, prompt, subject, run_practice, timestamp, adaption_dir
     global stimTypes, stimLog, stimLog_t, stimMirror, stimMirror_t
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -63,6 +64,7 @@ def main():
     dlg.addField('Adaption:', 'Both', choices=['Both', 'No Adaptation Only', 'Adaptation Only'])     # exp_res[4]
     dlg.addField('Number of Unique Stimuli:', '2', choices=['2', '3'])                      # exp_res[5]
     dlg.addField('Practice for No Adaption:', 'Yes', choices=['Yes', 'No'])                 # exp_res[6]
+    dlg.addField('Adaption Direction:', 'Both', choices=['Both', 'CW', 'CCW'])              # exp_res[7]
     exp_res = dlg.show()
     if not dlg.OK:
         exit()
@@ -79,11 +81,15 @@ def main():
             dlg.addText('Subject ID with monitor info has been found.')
             dlg.show()
 
-    runPractice = True if exp_res[6] == 'Yes' else False
+    run_practice = True if exp_res[6] == 'Yes' else False
     numStim = int(exp_res[5])
     stimTypes = ['log', 'mirror']
     if numStim == 3:
         stimTypes.append('both')
+
+    adaption_dir = exp_res[7]
+    if exp_res[4] == 'No Adaptation Only':
+        adaption_dir = ''
 
     exp_res = exp_res[:5]
 
@@ -131,7 +137,11 @@ def main():
     window.gammaRamp = gamma_ramp
     '''
 
-    refresh_rate = str(round(window.getActualFrameRate()))
+    refresh_rate = window.getActualFrameRate()
+    if refresh_rate is None:
+        refresh_rate = 'N/A'
+    else:
+        refresh_rate = str(round(refresh_rate))
     fixator = visual.Circle(window, size=(FIXATOR_SIZE_PX, FIXATOR_SIZE_PX), units='pix')
 
     # Save experiment setup data to file
@@ -141,7 +151,7 @@ def main():
     else:
         df = pd.read_csv('data/experiment_info.csv', index_col=0)
     
-    df = df.append(pd.Series(exp_res + monitor_info + [refresh_rate, timestamp], index=experiment_info_columns), ignore_index=True)
+    df = df.append(pd.Series(exp_res + monitor_info + [refresh_rate, timestamp, adaption_dir], index=experiment_info_columns), ignore_index=True)
     df.to_csv('data/experiment_info.csv')
 
     stimLog_t = generate_stimulus()
@@ -176,19 +186,20 @@ def run_without_adaption(window):
     window.flip()
     event.waitKeys()
 
+    # Generate stimulus speeds
     min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
     max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
     step_size = float(parser['NoAdaptionOptions']['StepSize'])
-    
     speeds = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
 
-    # Practice trials
-    if runPractice:
+    # Run through practice trials if specified
+    if run_practice:
         prompt.text = f'You will start with a practice round where the tests will get progressively more difficult. You will hear a beep if your response is incorrect. \n\nPress any key to start.'
         prompt.draw()
         window.flip()
         event.waitKeys()
 
+        # Initialize parameters for practice trials
         num_blocks = int(parser['PracticeOptions']['NumBlocks'])
         min_per_block = int(parser['PracticeOptions']['MinTrialsPerBlock'])
         acc_thresh = float(parser['PracticeOptions']['AccuracyThreshold'])
@@ -198,8 +209,11 @@ def run_without_adaption(window):
         show_times = np.linspace(starting_trial_time, TEST_STIMULUS_TIME, num=num_blocks)
         practice_data = pd.DataFrame(columns=data_columns+['Stim Time'])
 
+        # Iterate through different stimulus times
         for stim_time in show_times:
             num_correct, trial_count = 0, 0
+
+            # Iterate through same stimulus time until accuracy threshold met
             while True:
                 if trial_count > min_per_block and num_correct/trial_count >= acc_thresh:
                     break
@@ -209,6 +223,8 @@ def run_without_adaption(window):
                 fixator.color = 'red'
                 fixator.draw()
                 window.flip()
+
+                # Top-up adaptor (blank screen)
                 start_time = time.time()
                 while time.time() - start_time < practice_isi_time:
                     if len(event.getKeys(keyList=['escape'])) > 0:
@@ -219,6 +235,8 @@ def run_without_adaption(window):
 
                 res = []
                 reset_stims()
+
+                # Display practice test stimulus
                 start_time = time.time()
                 while len(res) == 0 and time.time() - start_time < stim_time:
                     res = event.getKeys(keyList=key_list)
@@ -242,12 +260,14 @@ def run_without_adaption(window):
 
                     core.wait(0.01)
 
+                # Clear window and wait for response if one hasn't been given yet
                 window.flip()
                 if len(res) == 0:
                     res = event.waitKeys()
                 if 'escape' in res:
                     quit()
 
+                # Update current block accuracy, provide audio feedback if incorrect
                 end_time = time.time()
                 if (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right'):
                     num_correct += 1
@@ -258,6 +278,7 @@ def run_without_adaption(window):
                     beep = sound.Sound('A', secs=0.2)
                     beep.play()
 
+                # Update and save practice data
                 practice_data = practice_data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time], index=practice_data.columns), ignore_index=True)
                 practice_data.to_csv(f'data/{subject}{timestamp}_practice.csv')
 
@@ -266,12 +287,8 @@ def run_without_adaption(window):
         window.flip()
         event.waitKeys()
 
-    # Create and loop through trials
+    # Generate trials based on combinations of stimulus type and speed
     trials = []
-    min_speed = float(parser['NoAdaptionOptions']['MinTestSpeed'])
-    max_speed = float(parser['NoAdaptionOptions']['MaxTestSpeed'])
-    step_size = float(parser['NoAdaptionOptions']['StepSize'])
-
     combinations = []
     for stim in stimTypes:
         for speed in speeds:
@@ -280,6 +297,7 @@ def run_without_adaption(window):
     [trials.extend(combinations) for _ in range(TRIALS_PER_COMBINATION)]
     random.shuffle(trials)
 
+    # Iterate through trials one by one
     is_first_trial = True
     for trial in trials:
         trial_speed = trial['speed']
@@ -323,7 +341,7 @@ def run_without_adaption(window):
         fixator.draw()
         window.flip()
 
-        # Test stimulus
+        # Display est stimulus
         res = []
         event.clearEvents()
         reset_stims()
@@ -350,15 +368,15 @@ def run_without_adaption(window):
             window.flip()
             core.wait(0.01)
 
-        # Wait for response
+        # Clear window and wait for response if one hasn't been given yet
         window.flip()
         if len(res) == 0:
             res = event.waitKeys()
         if 'escape' in res:
             quit()
 
+        # Update and save data with psychometric plot
         end_time = time.time()
-
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
         data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_noAdapt.csv')
@@ -384,30 +402,43 @@ def run_with_adaption(window):
     step_size = float(parser['AdaptionOptions']['StepSize'])
     speeds = [round(n, 5) for n in np.arange(min_speed, max_speed + step_size, step=step_size)]
 
+    # Generate trials based on combinations of stimulus type and speed
     trials = []
     combinations = []
     for stim in stimTypes:
         for speed in speeds:
             combinations.append({'stim': stim, 'speed': speed})
-
     [trials.extend(combinations) for _ in range(TRIALS_PER_COMBINATION)]
     random.shuffle(trials)
 
-    # Loop through trials
-    is_first_trial = True
-    adaptor_speed = float(parser['AdaptionOptions']['AdaptorSpeed'])
-    adaptor_dir_change_prop = float(parser['AdaptionOptions']['AdaptorDirChangeTime'])
+    # Set up adaption speeds based on adaption direction specified
+    if adaption_dir == 'Both':
+        log_adaptor_speed = float(parser['AdaptionOptions']['DualAdaptorSpeed'])
+        mirror_adaptor_speed = -log_adaptor_speed
+        adaptor_dir_change_prop = float(parser['AdaptionOptions']['AdaptorDirChangeTime'])
+    elif adaption_dir == 'CW':
+        log_adaptor_speed = float(parser['AdaptionOptions']['CWAdaptorSpeed'])
+        mirror_adaptor_speed = log_adaptor_speed
+        adaptor_dir_change_prop = 1.0
+    else:
+        log_adaptor_speed = float(parser['AdaptionOptions']['CCWAdaptorSpeed'])
+        mirror_adaptor_speed = log_adaptor_speed
+        adaptor_dir_change_prop = 1.0
 
+    print(log_adaptor_speed)
+    print(mirror_adaptor_speed)
+    # Iterate through trials one by one
+    is_first_trial = True
     for trials in trials:
         trial_stim = trials['stim']
         trial_speed = trials['speed']
 
-        # Top up adaptor
         fixator.color = 'red'
-        adaptor_speed = abs(adaptor_speed)
         adaption_time = INIT_ADAPTION_TIME if is_first_trial else POST_ADAPTION_TIME
         if is_first_trial:
             is_first_trial = False
+
+        # Top-up adaptor
         start_time = time.time()
         while time.time() - start_time < adaption_time:
             if len(event.getKeys(keyList=['escape'])) > 0:
@@ -415,11 +446,13 @@ def run_with_adaption(window):
 
             stimLog.draw()
             stimMirror_t.draw()
-            stimLog.ori = stimLog.ori + adaptor_speed/100
-            stimMirror_t.ori = stimMirror_t.ori - adaptor_speed/100
 
-            if time.time() - start_time >= adaptor_dir_change_prop * adaption_time and adaptor_speed > 0:
-                adaptor_speed = -adaptor_speed
+            if time.time() - start_time < adaptor_dir_change_prop * adaption_time:
+                stimLog.ori = stimLog.ori + log_adaptor_speed/100
+                stimMirror_t.ori = stimMirror_t.ori + mirror_adaptor_speed/100
+            else:
+                stimLog.ori = stimLog.ori - log_adaptor_speed/100
+                stimMirror_t.ori = stimMirror_t.ori - mirror_adaptor_speed/100
 
             fixator.draw()
             window.flip()
@@ -449,7 +482,7 @@ def run_with_adaption(window):
         fixator.draw()
         window.flip()
 
-        # Test stimulus
+        # Display test stimulus
         res = []
         event.clearEvents()
         start_time = time.time()
@@ -474,14 +507,15 @@ def run_with_adaption(window):
             window.flip()
             core.wait(0.01)
 
+        # Clear window and wait for response if one hasn't been given yet
         window.flip()
         if len(res) == 0:
             res = event.waitKeys()
         if 'escape' in res:
             quit()
 
+        # Save and update data with psychometric plot
         end_time = time.time()
-
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
         data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_Adapt.csv')
@@ -489,7 +523,9 @@ def run_with_adaption(window):
 
 def generate_stimulus(transparent = True, dir = 1):
     
+    # Coefficient that determines how spaced the lines are
     b = 0.7
+
     radius = np.exp(2*np.pi*b)
     lw = float(parser['StimulusOptions']['StimLineWidth'])
     
@@ -498,13 +534,14 @@ def generate_stimulus(transparent = True, dir = 1):
     t = np.linspace(0, 2*np.pi, 100)
     phi_vals = np.linspace(0, 2*np.pi, 1000)
 
+    # Build outline of image
     if transparent:
         fig, ax = plt.subplots()
     else:
         fig, ax = plt.subplots(facecolor=BG_COLOR)
         circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor=BG_COLOR, fill=True)        
 
-    already_black = False
+    # Draw black or white spirals depending on phi value around circle
     for phi in phi_vals:
         c = 'white'
         if phi > phase_number * phase_thresh:
@@ -523,11 +560,13 @@ def generate_stimulus(transparent = True, dir = 1):
 
         ax.plot(x_n, y_n, color=c, linewidth=lw, linestyle='--')
 
+    # Set graphical options to remove axes, set aspect ratio
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
     ax.set_aspect('equal')
     ax.axis('off')
 
+    # Save figure as image to use as stimulus
     if transparent:
         plt.savefig('stim.png', bbox_inches='tight', transparent = True)
     else:
