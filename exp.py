@@ -72,6 +72,11 @@ def main():
     def_width_cm, def_width_px, def_height_px = '', '', ''
     if os.path.exists(f'data/experiment_info.csv'):
         exp_df = pd.read_csv('data/experiment_info.csv', index_col=0)
+
+        # Used for compatability with previous version that didn't have specified adaption direction implemented
+        if 'Adaption Dir' not in exp_df:
+            exp_df['Adaption Dir'] = ''
+
         rows = exp_df.loc[exp_df['Subject'] == exp_res[0]]
         if len(rows) > 0:
             def_width_cm = str(rows.iloc[0]['Width (cm)'])
@@ -81,12 +86,12 @@ def main():
             dlg.addText('Subject ID with monitor info has been found.')
             dlg.show()
 
+    # Parse experimentation info about practice runs, stimulus types, adaption direction
     run_practice = True if exp_res[6] == 'Yes' else False
     numStim = int(exp_res[5])
     stimTypes = ['log', 'mirror']
     if numStim == 3:
         stimTypes.append('both')
-
     adaption_dir = exp_res[7]
     if exp_res[4] == 'No Adaptation Only':
         adaption_dir = ''
@@ -137,6 +142,7 @@ def main():
     window.gammaRamp = gamma_ramp
     '''
 
+    # Parse refresh rate of monitor
     refresh_rate = window.getActualFrameRate()
     if refresh_rate is None:
         refresh_rate = 'N/A'
@@ -154,6 +160,7 @@ def main():
     df = df.append(pd.Series(exp_res + monitor_info + [refresh_rate, timestamp, adaption_dir], index=experiment_info_columns), ignore_index=True)
     df.to_csv('data/experiment_info.csv')
 
+    # Generate stimuli
     stimLog_t = generate_stimulus()
     stimMirror_t = generate_stimulus(dir=-1)
     stimLog = generate_stimulus(transparent=False)
