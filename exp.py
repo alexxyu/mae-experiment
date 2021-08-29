@@ -261,7 +261,7 @@ def run_without_adaption(window):
                         stimMirror_t.draw()
                         stimLog.ori = stimLog.ori + trial_speed/100
                         stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
-                        
+
                     fixator.draw()
                     window.flip()
 
@@ -460,6 +460,9 @@ def run_with_adaption(window):
             else:
                 stimLog.ori = stimLog.ori - log_adaptor_speed/100
                 stimMirror_t.ori = stimMirror_t.ori - mirror_adaptor_speed/100
+
+            if int(stimLog.ori) % 360 == 0:
+                print(time.time() - start_time)
 
             fixator.draw()
             window.flip()
