@@ -1,8 +1,9 @@
-import os
 import math
-import numpy as np
+import os
+
 import matplotlib.pyplot as plt
-from psychopy import visual, event, core, gui, sound, monitors
+import numpy as np
+from psychopy import core, event, monitors, visual
 
 window = None
 
@@ -20,9 +21,8 @@ def generate_stimulus(transparent = True, dir = 1):
         fig, ax = plt.subplots()
     else:
         fig, ax = plt.subplots(facecolor='#A2A2A2')
-        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='#A2A2A2', fill=True)        
+        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor='#A2A2A2', fill=True)
 
-    already_black = False
     for phi in phi_vals:
         c = 'white'
         if phi > phase_number * phase_thresh:
@@ -32,7 +32,7 @@ def generate_stimulus(transparent = True, dir = 1):
             c = 'black'
         else:
             continue
-        
+
         x = np.cos(dir*(t - phi)) * np.exp(b*t)
         y = np.sin(dir*(t - phi)) * np.exp(b*t)
 
@@ -51,7 +51,7 @@ def generate_stimulus(transparent = True, dir = 1):
     else:
         ax.add_artist(circle)
         plt.savefig('stim.png', bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
-    
+
     stim = visual.ImageStim(window, image='stim.png', units='deg', size=(10, 10), pos=(0, 0))
     os.remove('stim.png')
     return stim
@@ -61,7 +61,7 @@ monitor.setSizePix((600, 600))
 monitor.setWidth(30)
 monitor.setDistance(54)
 
-window = visual.Window(size=(600, 600), color="#A2A2A2", monitor=monitor, fullscr=False) 
+window = visual.Window(size=(600, 600), color="#A2A2A2", monitor=monitor, fullscr=False)
 fixator = visual.Circle(window, size=(5, 5), color='red', units='pix')
 
 stim_1 = generate_stimulus(transparent=False)

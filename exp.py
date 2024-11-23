@@ -1,13 +1,14 @@
-import os
-import time
+import configparser
 import math
+import os
 import random
+import time
+from datetime import datetime
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import configparser
-from datetime import datetime
-import matplotlib.pyplot as plt
-from psychopy import visual, event, core, gui, sound, monitors
+from psychopy import core, event, gui, monitors, sound, visual
 
 random.seed(time.time())
 parser = configparser.ConfigParser()
@@ -70,7 +71,7 @@ def main():
         exit()
 
     def_width_cm, def_width_px, def_height_px = '', '', ''
-    if os.path.exists(f'data/experiment_info.csv'):
+    if os.path.exists('data/experiment_info.csv'):
         exp_df = pd.read_csv('data/experiment_info.csv', index_col=0)
 
         # Used for compatability with previous version that didn't have specified adaption direction implemented
@@ -133,7 +134,7 @@ def main():
     monitor.setSizePix((height_px, width_px))
     monitor.setWidth(width_cm)
     monitor.setDistance(viewing_dist)
-    window = visual.Window(color=BG_COLOR, monitor=monitor, fullscr=True) 
+    window = visual.Window(color=BG_COLOR, monitor=monitor, fullscr=True)
     window.mouseVisible = False
 
     '''
@@ -156,7 +157,7 @@ def main():
         df = pd.DataFrame(columns=experiment_info_columns)
     else:
         df = pd.read_csv('data/experiment_info.csv', index_col=0)
-    
+
     df = df.append(pd.Series(exp_res + monitor_info + [refresh_rate, timestamp, adaption_dir], index=experiment_info_columns), ignore_index=True)
     df.to_csv('data/experiment_info.csv')
 
@@ -201,7 +202,7 @@ def run_without_adaption(window):
 
     # Run through practice trials if specified
     if run_practice:
-        prompt.text = f'You will start with a practice round where the tests will get progressively more difficult. You will hear a beep if your response is incorrect. \n\nPress any key to start.'
+        prompt.text = 'You will start with a practice round where the tests will get progressively more difficult. You will hear a beep if your response is incorrect. \n\nPress any key to start.'
         prompt.draw()
         window.flip()
         event.waitKeys()
@@ -226,7 +227,7 @@ def run_without_adaption(window):
                     break
                 trial_speed = random.choice(speeds)
                 trial_stim = random.choice(stimTypes)
-                
+
                 fixator.color = 'red'
                 fixator.draw()
                 window.flip()
@@ -249,7 +250,7 @@ def run_without_adaption(window):
                     res = event.getKeys(keyList=key_list)
                     if 'escape' in res:
                         quit()
-                    
+
                     if trial_stim == 'log':
                         stimLog.draw()
                         stimLog.ori = stimLog.ori + trial_speed/100
@@ -289,7 +290,7 @@ def run_without_adaption(window):
                 practice_data = practice_data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time], index=practice_data.columns), ignore_index=True)
                 practice_data.to_csv(f'data/{subject}{timestamp}_practice.csv')
 
-        prompt.text = f'We will now move on to the actual experiment.\n\nPress any key to start.'
+        prompt.text = 'We will now move on to the actual experiment.\n\nPress any key to start.'
         prompt.draw()
         window.flip()
         event.waitKeys()
@@ -532,13 +533,13 @@ def run_with_adaption(window):
         save_psychometric_plot(data, 'With', 'Adapt')
 
 def generate_stimulus(transparent = True, dir = 1):
-    
+
     # Coefficient that determines how spaced the lines are
     b = 0.7
 
     radius = np.exp(2*np.pi*b)
     lw = float(parser['StimulusOptions']['StimLineWidth'])
-    
+
     phase_number = 1
     phase_thresh = np.pi / NUM_PHASES
     t = np.linspace(0, 2*np.pi, 100)
@@ -549,7 +550,7 @@ def generate_stimulus(transparent = True, dir = 1):
         fig, ax = plt.subplots()
     else:
         fig, ax = plt.subplots(facecolor=BG_COLOR)
-        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor=BG_COLOR, fill=True)        
+        circle = plt.Circle((0, 0), radius, edgecolor=None, facecolor=BG_COLOR, fill=True)
 
     # Draw black or white spirals depending on phi value around circle
     for phi in phi_vals:
@@ -561,7 +562,7 @@ def generate_stimulus(transparent = True, dir = 1):
             c = 'black'
         else:
             continue
-        
+
         x = np.cos(dir*(t - phi)) * np.exp(b*t)
         y = np.sin(dir*(t - phi)) * np.exp(b*t)
 
@@ -582,7 +583,7 @@ def generate_stimulus(transparent = True, dir = 1):
     else:
         ax.add_artist(circle)
         plt.savefig('stim.png', bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
-    
+
     stim = visual.ImageStim(window, image='stim.png', units='deg', size=(STIM_SIZE, STIM_SIZE))
     os.remove('stim.png')
     return stim
