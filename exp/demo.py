@@ -21,7 +21,7 @@ stim_2_t.draw()
 fixator.draw()
 window.flip()
 
-while len(event.getKeys()) == 0:
+while 'q' not in event.getKeys():
     stim_1.ori += 2
     stim_2_t.ori -= 2
 

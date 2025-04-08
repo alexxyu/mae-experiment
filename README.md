@@ -16,7 +16,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run demo.py to see an example of the stimulus (you can press any key to exit):
+Run demo.py to see an example of the stimulus (press 'q' to exit):
 
 ```sh
 source .venv/bin/activate
