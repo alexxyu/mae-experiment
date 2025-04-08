@@ -6,7 +6,7 @@ adaptation on direction discrimination sensitivity. Link TBD.
 ## Setup Instructions
 
 The demo.py and exp.py scripts are relevant to the experimental procedure. The following setup
-steps have been tested on an M1 ARM MacBook. Requires Python@3.10.
+steps have been tested on an M1 ARM-based MacBook. Requires Python@3.10.
 
 Run these the first time to create a virtual environment and install dependencies.
 
@@ -16,14 +16,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run demo.py to see an example of the stimulus:
+Run demo.py to see an example of the stimulus (you can press any key to exit):
 
 ```sh
 source .venv/bin/activate
 python demo.py
 ```
 
-Or, run exp.py to run the experiment:
+Or, run exp.py for the experiment procedure:
 
 ```sh
 source .venv/bin/activate
