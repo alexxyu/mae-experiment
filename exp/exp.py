@@ -233,8 +233,8 @@ def run_without_adaption(window):
                 window.flip()
 
                 # Top-up adaptor (blank screen)
-                start_time = time.time()
-                while time.time() - start_time < practice_isi_time:
+                clock = core.MonotonicClock()
+                while clock.getTime() < practice_isi_time:
                     if len(event.getKeys(keyList=['escape'])) > 0:
                         quit()
 
@@ -245,23 +245,24 @@ def run_without_adaption(window):
                 reset_stims()
 
                 # Display practice test stimulus
-                start_time = time.time()
-                while len(res) == 0 and time.time() - start_time < stim_time:
+                clock = core.MonotonicClock()
+                while len(res) == 0 and clock.getTime() < stim_time:
                     res = event.getKeys(keyList=key_list)
                     if 'escape' in res:
                         quit()
 
+                    t = clock.getTime()
                     if trial_stim == 'log':
                         stimLog.draw()
-                        stimLog.ori = stimLog.ori + trial_speed/100
+                        stimLog.ori = t * trial_speed
                     elif trial_stim == 'mirror':
                         stimMirror.draw()
-                        stimMirror.ori = stimMirror.ori + trial_speed/100
+                        stimMirror.ori = t * trial_speed
                     else:
                         stimLog.draw()
                         stimMirror_t.draw()
-                        stimLog.ori = stimLog.ori + trial_speed/100
-                        stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+                        stimLog.ori = t * trial_speed
+                        stimMirror_t.ori = t * stimMirror_t.ori
 
                     fixator.draw()
                     window.flip()
@@ -276,7 +277,7 @@ def run_without_adaption(window):
                     quit()
 
                 # Update current block accuracy, provide audio feedback if incorrect
-                end_time = time.time()
+                end_time = clock.getTime()
                 if (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right'):
                     num_correct += 1
                 trial_count += 1
@@ -287,7 +288,7 @@ def run_without_adaption(window):
                     beep.play()
 
                 # Update and save practice data
-                practice_data = practice_data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time, stim_time], index=practice_data.columns), ignore_index=True)
+                practice_data = practice_data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time, stim_time], index=practice_data.columns), ignore_index=True)
                 practice_data.to_csv(f'data/{subject}{timestamp}_practice.csv')
 
         prompt.text = 'We will now move on to the actual experiment.\n\nPress any key to start.'
@@ -320,8 +321,8 @@ def run_without_adaption(window):
             is_first_trial = False
         else:
             wait_time = POST_NO_ADAPTION_TIME
-        start_time = time.time()
-        while time.time() - start_time < wait_time:
+        clock = core.MonotonicClock()
+        while clock.getTime() < wait_time:
             if len(event.getKeys(keyList=['escape'])) > 0:
                 quit()
 
@@ -353,24 +354,25 @@ def run_without_adaption(window):
         res = []
         event.clearEvents()
         reset_stims()
-        start_time = time.time()
-        while len(res) == 0 and time.time() - start_time < TEST_STIMULUS_TIME:
+        clock = core.MonotonicClock()
+        while len(res) == 0 and clock.getTime() < TEST_STIMULUS_TIME:
             res = event.getKeys(keyList=key_list)
 
             if 'escape' in res:
                 quit()
 
+            t = clock.getTime()
             if trial_stim == 'log':
                 stimLog.draw()
-                stimLog.ori = stimLog.ori + trial_speed/100
+                stimLog.ori = t * trial_speed
             elif trial_stim == 'mirror':
                 stimMirror.draw()
-                stimMirror.ori = stimMirror.ori + trial_speed/100
+                stimMirror.ori = t * trial_speed
             else:
                 stimLog.draw()
                 stimMirror_t.draw()
-                stimLog.ori = stimLog.ori + trial_speed/100
-                stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+                stimLog.ori = t * trial_speed
+                stimMirror_t.ori = t * trial_speed
 
             fixator.draw()
             window.flip()
@@ -384,9 +386,9 @@ def run_without_adaption(window):
             quit()
 
         # Update and save data with psychometric plot
-        end_time = time.time()
+        end_time = clock.getTime()
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
-        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
+        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_noAdapt.csv')
         save_psychometric_plot(data, 'No', 'noAdapt')
 
@@ -447,23 +449,21 @@ def run_with_adaption(window):
             is_first_trial = False
 
         # Top-up adaptor
-        start_time = time.time()
-        while time.time() - start_time < adaption_time:
+        clock = core.MonotonicClock()
+        while clock.getTime() < adaption_time:
             if len(event.getKeys(keyList=['escape'])) > 0:
                 quit()
 
             stimLog.draw()
             stimMirror_t.draw()
 
-            if time.time() - start_time < adaptor_dir_change_prop * adaption_time:
-                stimLog.ori = stimLog.ori + log_adaptor_speed/100
-                stimMirror_t.ori = stimMirror_t.ori + mirror_adaptor_speed/100
+            t = clock.getTime()
+            if t < adaptor_dir_change_prop * adaption_time:
+                stimLog.ori = t * log_adaptor_speed
+                stimMirror_t.ori = t * mirror_adaptor_speed
             else:
-                stimLog.ori = stimLog.ori - log_adaptor_speed/100
-                stimMirror_t.ori = stimMirror_t.ori - mirror_adaptor_speed/100
-
-            if int(stimLog.ori) % 360 == 0:
-                print(time.time() - start_time)
+                stimLog.ori = t * (-log_adaptor_speed)
+                stimMirror_t.ori = t * (-mirror_adaptor_speed)
 
             fixator.draw()
             window.flip()
@@ -496,23 +496,24 @@ def run_with_adaption(window):
         # Display test stimulus
         res = []
         event.clearEvents()
-        start_time = time.time()
-        while len(res) == 0 and time.time() - start_time < TEST_STIMULUS_TIME:
+        clock = core.MonotonicClock()
+        while len(res) == 0 and clock.getTime() < TEST_STIMULUS_TIME:
             res = event.getKeys(keyList=key_list)
             if 'escape' in res:
                 quit()
 
+            t = clock.getTime()
             if trial_stim == 'log':
                 stimLog.draw()
-                stimLog.ori = stimLog.ori + trial_speed/100
+                stimLog.ori = t * trial_speed
             elif trial_stim == 'mirror':
                 stimMirror.draw()
-                stimMirror.ori = stimMirror.ori + trial_speed/100
+                stimMirror.ori = t * trial_speed
             else:
                 stimLog.draw()
                 stimMirror_t.draw()
-                stimLog.ori = stimLog.ori + trial_speed/100
-                stimMirror_t.ori = stimMirror_t.ori + trial_speed/100
+                stimLog.ori = t * trial_speed
+                stimMirror_t.ori = t * trial_speed
 
             fixator.draw()
             window.flip()
@@ -526,9 +527,9 @@ def run_with_adaption(window):
             quit()
 
         # Save and update data with psychometric plot
-        end_time = time.time()
+        end_time = clock.getTime()
         is_correct = (trial_speed < 0 and res[0] == 'left') or (trial_speed > 0 and res[0] == 'right')
-        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time - start_time], index=data.columns), ignore_index=True)
+        data = data.append(pd.Series([res[0], trial_stim, trial_speed, is_correct, end_time], index=data.columns), ignore_index=True)
         data.to_csv(f'data/{subject}{timestamp}_Adapt.csv')
         save_psychometric_plot(data, 'With', 'Adapt')
 
